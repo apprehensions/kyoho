@@ -1,0 +1,84 @@
+#!/bin/sh -ex
+
+get_package_dest() {
+	case "$1" in
+		"RobloxApp.zip")                 echo "" ;;
+		"shaders.zip")                   echo "shaders/" ;;
+		"ssl.zip")                       echo "ssl/" ;;
+		"WebView2.zip")                  echo "" ;;
+		"content-avatar.zip")            echo "content/avatar" ;;
+		"content-configs.zip")           echo "content/configs" ;;
+		"content-fonts.zip")             echo "content/fonts" ;;
+		"content-sky.zip")               echo "content/sky" ;;
+		"content-sounds.zip")            echo "content/sounds" ;;
+		"content-textures2.zip")         echo "content/textures" ;;
+		"content-models.zip")            echo "content/models" ;;
+		"content-textures3.zip")         echo "PlatformContent/pc/textures" ;;
+		"content-terrain.zip")           echo "PlatformContent/pc/terrain" ;;
+		"content-platform-fonts.zip")    echo "PlatformContent/pc/fonts" ;;
+		"extracontent-luapackages.zip")  echo "ExtraContent/LuaPackages" ;;
+		"extracontent-translations.zip") echo "ExtraContent/translations" ;;
+		"extracontent-models.zip")       echo "ExtraContent/models" ;;
+		"extracontent-textures.zip")     echo "ExtraContent/textures" ;;
+		"extracontent-places.zip")       echo "ExtraContent/places" ;;
+	esac
+}
+
+write_appsettings() {
+	cat <<EOF | sed -e 's/$/\r/' > "$ver_dir/AppSettings.xml"
+<?xml version="1.0" encoding="UTF-8"?>
+<Settings>
+	<ContentFolder>content</ContentFolder>
+	<BaseUrl>http://www.roblox.com</BaseUrl>
+</Settings>
+EOF
+}
+
+fetch_manifest() {
+	curl -s https://setup.rbxcdn.com/${ver}-rbxPkgManifest.txt |
+		sed -e 's/\r//' -e 1d |
+		sed 'N;N;N;s/\n/,/g'
+}
+
+deploy_manifest() {
+	while IFS=, read -r name sum _ _; do
+		pkg_file="$dl_dir/$sum"
+		dest_dir="$ver_dir/$(get_package_dest "$name")"
+	
+		[ "$name" = "MicrosoftEdgeWebview2Setup.exe" ] && continue
+		[ "$name" = "RobloxPlayerLauncher.exe"       ] && continue
+		[ "$name" = "WebView2RuntimeInstaller.zip"   ] && continue
+	
+		echo "$sum $pkg_file" | md5sum -c || {
+			curl -fL https://setup.rbxcdn.com/${ver}-$name -o $dest
+	
+			echo "$sum $pkg_file" | md5sum -c || exit 1
+		}
+	
+		mkdir -p "$dest_dir"
+		./unarp "$pkg_file" "$dest_dir"
+	done
+}
+
+dat_dir="${XDG_DATA_HOME:-$HOME/.local/share}/vega"
+vers_dir="$dat_dir/versions"
+cac_dir="${XDG_CACHE_HOME:-$HOME/.cache}/vega"
+dl_dir="$cac_dir/downloads"
+
+mkdir -p "$dl_dir"
+
+export WINEPREFIX="$dat_dir/pfx"
+
+ver="$(curl https://clientsettings.roblox.com/v2/client-version/WindowsPlayer)"
+ver=${ver##*clientVersionUpload\":\"}
+ver=${ver%%\"*}
+ver_dir="$vers_dir/$ver"
+
+[ -d "$ver_dir" ] || {
+	mkdir -p "$ver_dir"
+	fetch_manifest | deploy_manifest
+	write_appsettings
+}
+
+trap 'wineserver -k' INT EXIT
+wine "$ver_dir/RobloxPlayerBeta.exe" "$@"
